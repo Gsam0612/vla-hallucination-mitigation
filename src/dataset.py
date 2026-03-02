@@ -10,7 +10,6 @@ to predict the question — it only learns to generate answers.
 import torch
 from torch.utils.data import Dataset
 from typing import List, Dict, Any, Optional
-from PIL import Image
 
 
 class VLADataset(Dataset):
@@ -18,7 +17,7 @@ class VLADataset(Dataset):
 
     Features:
     - Proper label masking (only ASSISTANT tokens count)
-    - Handles image token alignment
+    - Text-only: no image tokens (synthetic data, no real images)
     - Supports both SFT and GRPO data formats
     """
 
@@ -29,12 +28,10 @@ class VLADataset(Dataset):
         data: List[Dict[str, Any]],
         processor,
         max_length: int = 1024,
-        image_size: tuple = (640, 480),
     ):
         self.data = data
         self.processor = processor
         self.max_length = max_length
-        self.placeholder = Image.new('RGB', image_size, color='gray')
 
     def __len__(self):
         return len(self.data)
@@ -43,24 +40,17 @@ class VLADataset(Dataset):
         item = self.data[idx]
         conversation = item['conversation']
 
-        # ── Tokenize full conversation ──────────────────────────────
-        inputs = self.processor(
-            text=conversation,
-            images=self.placeholder,
+        # ── Tokenize full conversation (text-only, no images) ───────
+        inputs = self.processor.tokenizer(
+            conversation,
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length,
-            truncation=False,
+            truncation=True,
         )
 
         input_ids = inputs['input_ids'].squeeze(0)
         attention_mask = inputs['attention_mask'].squeeze(0)
-        pixel_values = inputs['pixel_values'].squeeze(0)
-
-        # Truncate if needed (preserve image tokens at start)
-        if input_ids.shape[0] > self.max_length:
-            input_ids = input_ids[:self.max_length]
-            attention_mask = attention_mask[:self.max_length]
 
         # ── Mask labels: only train on ASSISTANT response ───────────
         labels = input_ids.clone()
@@ -90,16 +80,14 @@ class VLADataset(Dataset):
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
-            'pixel_values': pixel_values,
             'labels': labels,
         }
 
 
 def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
-    """Custom collator that stacks batch tensors."""
+    """Custom collator that stacks batch tensors (text-only, no pixel_values)."""
     return {
         'input_ids':      torch.stack([x['input_ids'] for x in batch]),
         'attention_mask':  torch.stack([x['attention_mask'] for x in batch]),
-        'pixel_values':    torch.stack([x['pixel_values'] for x in batch]),
         'labels':          torch.stack([x['labels'] for x in batch]),
     }

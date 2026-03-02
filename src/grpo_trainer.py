@@ -24,7 +24,6 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 from typing import List, Dict, Any, Optional, Tuple
-from PIL import Image
 from tqdm import tqdm
 import json
 import os
@@ -77,22 +76,20 @@ class GRPOTrainer:
     def generate_candidates(
         self,
         prompt: str,
-        image: Optional[Image.Image] = None,
         k: int = 4,
     ) -> List[str]:
         """Generate K candidate responses for a prompt.
 
         Corresponds to GRPO Step 1 (Sampling).
+        Text-only: no images used (synthetic data).
         """
-        if image is None:
-            image = Image.new('RGB', (640, 480), color='gray')
-
         candidates = []
         for _ in range(k):
-            inputs = self.processor(
-                text=prompt,
-                images=image,
+            inputs = self.processor.tokenizer(
+                prompt,
                 return_tensors="pt",
+                truncation=True,
+                max_length=self.training_config.max_length,
             ).to(self.device)
 
             with torch.no_grad():
@@ -158,20 +155,16 @@ class GRPOTrainer:
         self,
         prompt: str,
         response: str,
-        image: Optional[Image.Image] = None,
     ) -> torch.Tensor:
         """Compute log-probability of response given prompt.
 
         Returns scalar tensor (mean log-prob over response tokens).
+        Text-only: no images used (synthetic data).
         """
-        if image is None:
-            image = Image.new('RGB', (640, 480), color='gray')
-
         full_text = f"{prompt} {response}"
 
-        inputs = self.processor(
-            text=full_text,
-            images=image,
+        inputs = self.processor.tokenizer(
+            full_text,
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -193,7 +186,6 @@ class GRPOTrainer:
         outputs = self.model(
             input_ids=inputs['input_ids'],
             attention_mask=inputs['attention_mask'],
-            pixel_values=inputs.get('pixel_values'),
             labels=labels,
         )
 
@@ -217,7 +209,7 @@ class GRPOTrainer:
         """
         # Build prompt (without the answer)
         prompt = (
-            f"USER: <image>\n"
+            f"USER: "
             f"{SYSTEM_PROMPT}\n"
             f"{sample['detector_prompt']}\n"
             f"Question: {sample['question']}\n"

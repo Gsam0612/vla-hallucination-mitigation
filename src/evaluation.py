@@ -15,7 +15,6 @@ import os
 import time
 from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
-from PIL import Image
 from tqdm import tqdm
 
 from .config import EvalConfig, RewardConfig
@@ -55,27 +54,24 @@ class VLAEvaluator:
         question: str,
         detector_prompt: str = "",
         use_cot: bool = True,
-        image: Optional[Image.Image] = None,
     ) -> str:
-        """Generate a model response."""
-        if image is None:
-            image = Image.new('RGB', (640, 480), color='lightgray')
-
+        """Generate a model response (text-only, no images)."""
         if use_cot:
             prompt = (
-                f"USER: <image>\n"
+                f"USER: "
                 f"{SYSTEM_PROMPT}\n"
                 f"{detector_prompt}\n"
                 f"Question: {question}\n"
                 f"ASSISTANT:"
             )
         else:
-            prompt = f"USER: <image>\n{question}\nASSISTANT:"
+            prompt = f"USER: {question}\nASSISTANT:"
 
-        inputs = self.processor(
-            text=prompt,
-            images=image,
+        inputs = self.processor.tokenizer(
+            prompt,
             return_tensors="pt",
+            truncation=True,
+            max_length=512,
         ).to(self.model.device)
 
         with __import__('torch').no_grad():

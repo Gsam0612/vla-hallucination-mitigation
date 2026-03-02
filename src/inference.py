@@ -14,7 +14,6 @@ checking across 4 camera angles before answering.
 import re
 import torch
 from typing import List, Dict, Any, Optional
-from PIL import Image
 
 from .objects import AI2THOR_OBJECTS
 from .multi_view import MultiViewConsistency
@@ -123,7 +122,6 @@ class VLAInferencePipeline:
         self,
         question: str,
         scene_objects: Optional[List[Dict[str, Any]]] = None,
-        image: Optional[Image.Image] = None,
         use_multiview: bool = True,
         use_cot: bool = True,
     ) -> Dict[str, Any]:
@@ -132,15 +130,12 @@ class VLAInferencePipeline:
         Args:
             question:       User question about the scene.
             scene_objects:  List of objects in the scene (ground truth or detected).
-            image:          Scene image (placeholder if not provided).
             use_multiview:  Whether to perform multi-view consistency check.
             use_cot:        Whether to use CoT prompting.
 
         Returns:
             Dict with answer, reasoning trace, verification results.
         """
-        if image is None:
-            image = Image.new('RGB', (640, 480), color='lightgray')
         if scene_objects is None:
             scene_objects = []
 
@@ -158,19 +153,20 @@ class VLAInferencePipeline:
         # Step 3: Generate response with CoT
         if use_cot:
             prompt = (
-                f"USER: <image>\n"
+                f"USER: "
                 f"{SYSTEM_PROMPT}\n"
                 f"{detector_prompt}\n"
                 f"Question: {question}\n"
                 f"ASSISTANT:"
             )
         else:
-            prompt = f"USER: <image>\n{question}\nASSISTANT:"
+            prompt = f"USER: {question}\nASSISTANT:"
 
-        inputs = self.processor(
-            text=prompt,
-            images=image,
+        inputs = self.processor.tokenizer(
+            prompt,
             return_tensors="pt",
+            truncation=True,
+            max_length=512,
         ).to(self.device)
 
         with torch.no_grad():
@@ -194,7 +190,7 @@ class VLAInferencePipeline:
         # Step 5: If unreliable, re-generate with stricter prompt
         if not verification['is_reliable'] and use_multiview:
             strict_prompt = (
-                f"USER: <image>\n"
+                f"USER: "
                 f"{SYSTEM_PROMPT}\n"
                 f"{detector_prompt}\n"
                 f"IMPORTANT: Only mention these verified objects: {', '.join(consistent_objects)}\n"
@@ -202,10 +198,11 @@ class VLAInferencePipeline:
                 f"ASSISTANT:"
             )
 
-            inputs = self.processor(
-                text=strict_prompt,
-                images=image,
+            inputs = self.processor.tokenizer(
+                strict_prompt,
                 return_tensors="pt",
+                truncation=True,
+                max_length=512,
             ).to(self.device)
 
             with torch.no_grad():

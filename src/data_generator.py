@@ -273,7 +273,7 @@ def build_conversation(
       ASSISTANT: {answer}
     """
     return (
-        f"USER: <image>\n"
+        f"USER: "
         f"{SYSTEM_PROMPT}\n"
         f"{detector_prompt}\n"
         f"Question: {question}\n"
