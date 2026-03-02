@@ -375,6 +375,14 @@ def generate_training_sample(
         'ground_truth': scene.get_ground_truth(),
         'multi_view_verified': consistent_objects,
         'view_detections': view_detections,
+        'scene': {
+            'room_type': scene.room_type,
+            'complexity': scene.complexity,
+            'object_list': scene.get_object_list(),
+            'objects': scene.objects,
+            'hazards': scene.hazards,
+            'spatial_relations': scene.spatial_relations,
+        },
     }
 
 
