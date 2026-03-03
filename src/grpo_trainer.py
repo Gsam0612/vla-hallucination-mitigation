@@ -140,18 +140,29 @@ class GRPOTrainer:
     # ── Advantage computation ───────────────────────────────────────
 
     @staticmethod
-    def compute_advantages(rewards: List[float]) -> torch.Tensor:
+    def compute_advantages(
+        rewards: List[float],
+        baseline: float = 0.0,
+    ) -> torch.Tensor:
         """Compute group-relative advantages (Step 3).
 
-        advantage_i = (reward_i - mean) / (std + eps)
+        When candidates have diverse rewards:
+          advantage_i = (reward_i - mean) / (std + eps)
 
-        This normalizes rewards within each group so the model
-        learns RELATIVE quality, not absolute reward scale.
+        When all candidates get ~identical rewards (std < 0.01),
+        fall back to reward-minus-baseline so the model still
+        gets a learning signal (negative rewards push the model
+        away from bad responses):
+          advantage_i = reward_i - baseline
         """
         r = torch.tensor(rewards, dtype=torch.float32)
-        mean = r.mean()
-        std = r.std() + 1e-8
-        return (r - mean) / std
+        std = r.std()
+        if std < 0.01:
+            # Fallback: use raw reward vs baseline
+            # If all rewards are -1.4, advantages become -1.4
+            # → model gets negative gradient signal
+            return r - baseline
+        return (r - r.mean()) / (std + 1e-8)
 
     # ── Log probability computation ─────────────────────────────────
 
@@ -240,16 +251,15 @@ class GRPOTrainer:
         self.optimizer.zero_grad()
 
         total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+        n_used = 0
         for i, (candidate, advantage) in enumerate(zip(candidates, advantages)):
-            if abs(advantage.item()) < 1e-6:
-                continue  # Skip zero-advantage candidates
-
             log_prob = self.compute_log_prob(prompt, candidate)
             # Negative because we maximize the GRPO objective
             loss_i = -advantage.to(self.device) * log_prob
             total_loss = total_loss + loss_i
+            n_used += 1
 
-        total_loss = total_loss / max(len(candidates), 1)
+        total_loss = total_loss / max(n_used, 1)
 
         if total_loss.requires_grad:
             total_loss.backward()
