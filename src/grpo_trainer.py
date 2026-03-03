@@ -81,30 +81,34 @@ class GRPOTrainer:
         """Generate K candidate responses for a prompt.
 
         Corresponds to GRPO Step 1 (Sampling).
+        Uses num_return_sequences=k for batched generation (much faster
+        than sequential generation in a loop).
         Text-only: no images used (synthetic data).
         """
+        inputs = self.processor.tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=self.training_config.max_length,
+        ).to(self.device)
+
+        pad_token_id = (self.processor.tokenizer.pad_token_id
+                        or self.processor.tokenizer.eos_token_id)
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=self.config.max_new_tokens,
+                do_sample=True,
+                temperature=self.config.temperature,
+                top_p=0.9,
+                num_return_sequences=k,
+                pad_token_id=pad_token_id,
+            )
+
         candidates = []
-        for _ in range(k):
-            inputs = self.processor.tokenizer(
-                prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=self.training_config.max_length,
-            ).to(self.device)
-
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=self.config.max_new_tokens,
-                    do_sample=True,
-                    temperature=self.config.temperature,
-                    top_p=0.9,
-                    pad_token_id=self.processor.tokenizer.pad_token_id or
-                                 self.processor.tokenizer.eos_token_id,
-                )
-
-            text = self.processor.decode(outputs[0], skip_special_tokens=True)
-            # Extract assistant part
+        for seq in outputs:
+            text = self.processor.decode(seq, skip_special_tokens=True)
             if "ASSISTANT:" in text:
                 text = text.split("ASSISTANT:")[-1].strip()
             candidates.append(text)
